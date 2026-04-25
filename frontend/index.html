@@ -976,10 +976,21 @@ const STATE = {
     show: { boxes: true, labels: true, heat: false },
 };
 
+function defaultApiUrl() {
+    const p = window.location;
+    if (p.protocol === 'http:' || p.protocol === 'https:') return p.origin;
+    return 'http://127.0.0.1:8000';
+}
+function defaultSampleFolder() {
+    const p = window.location;
+    if (p.protocol === 'http:' || p.protocol === 'https:')
+        return `${p.origin}/sample-images`;
+    return '../dataset/valid/images';
+}
 function loadSettings() {
     const def = {
-        apiUrl: 'http://localhost:8000',
-        sampleFolder: '../dataset/valid/images',
+        apiUrl: defaultApiUrl(),
+        sampleFolder: defaultSampleFolder(),
         theme: 'dark',
     };
     try {

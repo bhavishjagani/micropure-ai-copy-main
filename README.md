@@ -135,7 +135,15 @@ Levels: `<20` Low, `20–45` Moderate, `45–70` High, `70+` Critical.
 
 ## Frontend
 
-Just open `frontend/index.html` in any modern browser.
+**Recommended:** with the API already running, open the full dashboard in your browser:
+
+**http://127.0.0.1:8000/dashboard** (use the same host/port as uvicorn)
+
+That page talks to `/predict/` on the same origin, so you do not need to change Settings.
+
+You can also open `frontend/index.html` directly from disk (`file://`) if you prefer; set the API URL in **Settings** to match your server.
+
+`/`, `/health`, and `/docs` are JSON / API docs — not the visual app.
 
 - Drag-drop or paste images (Ctrl/⌘ + V), or pick a sample tile.
 - Adjust **Confidence**, **IOU** and **image size** before analysis.

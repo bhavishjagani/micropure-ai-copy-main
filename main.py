@@ -18,7 +18,8 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from ultralytics import YOLO
 
@@ -65,6 +66,23 @@ _model_name: str | None = None
 _model_load_error: str | None = None
 
 
+def _frontend_index_path() -> Path | None:
+    """Where `frontend/index.html` lives (project root or parent of `backend/`)."""
+    for root in (HERE, HERE.parent):
+        p = root / "frontend" / "index.html"
+        if p.is_file():
+            return p
+    return None
+
+
+def _sample_images_dir() -> Path | None:
+    for root in (HERE, HERE.parent):
+        d = root / "dataset" / "valid" / "images"
+        if d.is_dir():
+            return d
+    return None
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     global _model, _model_path, _model_name, _model_load_error
@@ -80,6 +98,8 @@ async def _lifespan(app: FastAPI):
         _model_name = None
         _model_load_error = f"{type(exc).__name__}: {exc}"
         print(f"[MicroPure] Model load failed: {_model_load_error}")
+    if _frontend_index_path():
+        print("[MicroPure] Open the full UI in your browser: /dashboard (same host/port as this server)")
     yield
     _model = None
 
@@ -119,6 +139,15 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Dataset thumbnails for the UI when opened from /dashboard (same origin).
+_sample_dir = _sample_images_dir()
+if _sample_dir is not None:
+    app.mount(
+        "/sample-images",
+        StaticFiles(directory=str(_sample_dir)),
+        name="sample_images",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -242,16 +271,35 @@ def _compute_risk(detections: list[dict[str, Any]], img_w: int, img_h: int) -> d
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.get("/dashboard", include_in_schema=False)
+def serve_dashboard() -> FileResponse:
+    """Full web UI (not JSON — open this in a browser)."""
+    index = _frontend_index_path()
+    if index is None:
+        raise HTTPException(
+            status_code=404,
+            detail="frontend/index.html not found next to main.py or in the parent folder.",
+        )
+    return FileResponse(index, media_type="text/html")
+
+
 @app.get("/")
 def root() -> dict[str, Any]:
     ok = _model is not None
+    dash = "/dashboard" if _frontend_index_path() else None
     return {
         "name": "MicroPure AI",
         "status": "ok" if ok else "degraded",
         "model": _model_name,
         "model_path": str(_model_path) if _model_path else None,
         "model_error": _model_load_error,
-        "endpoints": ["/health", "/predict/"],
+        "endpoints": ["/health", "/predict/", "/dashboard"],
+        "dashboard": dash,
+        "hint": (
+            "JSON is the API. Open http://127.0.0.1:PORT/dashboard in a browser for the full UI."
+            if dash
+            else None
+        ),
     }
 
 
