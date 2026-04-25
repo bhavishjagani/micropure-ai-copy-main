@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-eI7PSr3L1XLISH8JdDII5YN/njoSsxfbrkCTnJrzXt+ENP5MOVBxD+l6sEG4zoLp" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 /* =========================================================
    Design tokens
@@ -1210,7 +1210,12 @@ async function analyze() {
         toast(`Analysis complete · ${data.predictions.length} detections`, 'ok');
     } catch (err) {
         console.error(err);
-        toast('Backend unreachable: ' + err.message, 'error', 6000);
+        const msg = err && err.message ? err.message : String(err);
+        if (/Chart is not defined|Chart\.js|chart\.umd/i.test(msg) || (typeof Chart === 'undefined' && msg.includes('Chart'))) {
+            toast('Chart library failed to load (network/ad blocker). Charts are disabled; detection still works after reload.', 'error', 8000);
+        } else {
+            toast('Analysis failed: ' + msg, 'error', 6000);
+        }
     } finally {
         loader.classList.remove('active');
     }
@@ -1258,8 +1263,13 @@ function applyResult(data) {
     // --- detection list ---
     renderDetectionList(data.predictions);
 
-    // --- charts ---
-    renderCharts(data);
+    // --- charts (optional; must not break the rest of the dashboard) ---
+    try {
+        renderCharts(data);
+    } catch (chartErr) {
+        console.error(chartErr);
+        toast('Charts error: ' + (chartErr.message || chartErr), 'error', 5000);
+    }
 }
 
 function setStat(sel, value, delta) {
@@ -1469,8 +1479,20 @@ function chartGridColor() {
 }
 
 function renderCharts(data) {
+    if (typeof Chart === 'undefined') {
+        console.warn('Chart.js not loaded; skipping charts.');
+        return;
+    }
     const text = chartTextColor();
     const grid = chartGridColor();
+    const pluginsOnly = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { labels: { color: text, boxWidth: 10, font: { size: 11 } } },
+            tooltip: { backgroundColor: 'rgba(20,28,55,0.95)', borderColor: grid, borderWidth: 1 },
+        },
+    };
 
     if (chartConf) chartConf.destroy();
     chartConf = new Chart($('#chartConf'), {
@@ -1504,7 +1526,7 @@ function renderCharts(data) {
                 borderColor: 'transparent',
             }],
         },
-        options: { ...chartOpts(text, grid), cutout: '62%' },
+        options: { ...pluginsOnly, cutout: '62%' },
     });
 
     if (chartRisk) chartRisk.destroy();
@@ -1522,7 +1544,7 @@ function renderCharts(data) {
             }],
         },
         options: {
-            ...chartOpts(text, grid),
+            ...pluginsOnly,
             scales: {
                 r: {
                     angleLines: { color: grid },
