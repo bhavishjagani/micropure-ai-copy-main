@@ -48,6 +48,28 @@ pip install -r requirements.txt
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+**If you see `Error loading ASGI app. Could not import module 'main'`:**
+
+1. **Wrong folder** — `uvicorn` must be started from the directory that contains `main.py`, or tell it where to look:
+   ```bash
+   cd /path/to/micropure-ai-copy-main
+   uvicorn main:app --reload --host 127.0.0.1 --port 8000
+   ```
+   Or from anywhere:
+   ```bash
+   uvicorn main:app --app-dir /path/to/micropure-ai-copy-main --host 127.0.0.1 --port 8000
+   ```
+2. **Easiest fix** — run the app directly (no `main` import path issue):
+   ```bash
+   cd /path/to/micropure-ai-copy-main
+   python main.py
+   ```
+3. **See the real error** — from that same folder:
+   ```bash
+   python -c "import main; print('import ok')"
+   ```
+   If this fails, read the full traceback (missing `fastapi`, `ultralytics`, etc.).
+
 The API will print which model it loaded, e.g.:
 
 ```

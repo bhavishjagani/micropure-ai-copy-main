@@ -12,6 +12,7 @@ import io
 import math
 import os
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -56,10 +57,48 @@ def _resolve_model_path() -> Path:
     )
 
 
-MODEL_PATH = _resolve_model_path()
-MODEL = YOLO(str(MODEL_PATH))
-MODEL_NAME = MODEL_PATH.name
-print(f"[MicroPure] Loaded model: {MODEL_PATH}")
+# Loaded on startup so `import main` never fails just because weights are
+# missing or YOLO is slow — uvicorn can start and /health reports the error.
+_model: Any = None
+_model_path: Path | None = None
+_model_name: str | None = None
+_model_load_error: str | None = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    global _model, _model_path, _model_name, _model_load_error
+    _model_load_error = None
+    try:
+        _model_path = _resolve_model_path()
+        _model = YOLO(str(_model_path))
+        _model_name = _model_path.name
+        print(f"[MicroPure] Loaded model: {_model_path}")
+    except Exception as exc:  # noqa: BLE001 — show any load failure in /health
+        _model = None
+        _model_path = None
+        _model_name = None
+        _model_load_error = f"{type(exc).__name__}: {exc}"
+        print(f"[MicroPure] Model load failed: {_model_load_error}")
+    yield
+    _model = None
+
+
+def _require_model() -> Any:
+    if _model is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "YOLO model is not loaded.",
+                "error": _model_load_error,
+                "fix": (
+                    "Put yolov8s.pt, yolov8n.pt, or best.pt in the project folder "
+                    "(same folder as main.py) and restart the server."
+                ),
+            },
+        )
+    return _model
+
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -68,6 +107,7 @@ app = FastAPI(
     title="MicroPure AI",
     description="Microplastic detection + multi-factor water-risk assessment.",
     version="2.0.0",
+    lifespan=_lifespan,
 )
 
 # CORS - kept permissive because the frontend is a static file opened locally
@@ -204,20 +244,24 @@ def _compute_risk(detections: list[dict[str, Any]], img_w: int, img_h: int) -> d
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root() -> dict[str, Any]:
+    ok = _model is not None
     return {
         "name": "MicroPure AI",
-        "status": "ok",
-        "model": MODEL_NAME,
-        "model_path": str(MODEL_PATH),
+        "status": "ok" if ok else "degraded",
+        "model": _model_name,
+        "model_path": str(_model_path) if _model_path else None,
+        "model_error": _model_load_error,
         "endpoints": ["/health", "/predict/"],
     }
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    ok = _model is not None
     return {
-        "status": "ok",
-        "model": MODEL_NAME,
+        "status": "ok" if ok else "degraded",
+        "model": _model_name,
+        "model_error": _model_load_error,
         "version": app.version,
     }
 
@@ -254,9 +298,11 @@ async def predict(
 
     img_w, img_h = img.size
 
+    model = _require_model()
+
     # ---- inference -------------------------------------------------------
     started = time.perf_counter()
-    results = MODEL.predict(
+    results = model.predict(
         img,
         verbose=False,
         imgsz=imgsz,
@@ -280,7 +326,7 @@ async def predict(
             size_class = _classify_size(area_ratio)
             detections.append({
                 "class_id": int(cls),
-                "class_name": MODEL.names.get(int(cls), str(int(cls))) if hasattr(MODEL, "names") else str(int(cls)),
+                "class_name": model.names.get(int(cls), str(int(cls))) if hasattr(model, "names") else str(int(cls)),
                 "confidence": float(conf_t),
                 "bbox": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)],
                 "width": round(w, 2),
@@ -313,7 +359,7 @@ async def predict(
             confidence_buckets["0.8-1.0"] += 1
 
     return JSONResponse(content={
-        "model": MODEL_NAME,
+        "model": _model_name,
         "image": {
             "width": img_w,
             "height": img_h,
@@ -329,3 +375,11 @@ async def predict(
         },
         "risk": risk,
     })
+
+
+if __name__ == "__main__":
+    # Run from the folder that contains main.py — avoids "could not import module main"
+    # when the shell's working directory is wrong for `uvicorn main:app`.
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8000)
